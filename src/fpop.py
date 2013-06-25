@@ -128,7 +128,7 @@ class FPOPExchanger(object):
 
         self.t = 0
     
-        self.t0 = 1E-6
+        self.t0 = 1E-7
 
         self.exchanged_per_res = np.zeros((1, self.num_res))
 
@@ -137,11 +137,11 @@ class FPOPExchanger(object):
         # first just do On or Off
         temp_rate_mat = np.vstack([self.res_rate_ex] * self.num_states)
 
-        temp_rate_mat[np.where(self.avg_sasas < 0.3)] = 0
+        temp_rate_mat[np.where(self.avg_sasas < 0.5)] = 0
 
         return temp_rate_mat
 
-    def _derivX(self, X, t):
+    def _derivX(self, t, X):
         # first num_states are the state populations
         # last piece of X is the OH concentration
         
@@ -150,10 +150,10 @@ class FPOPExchanger(object):
         M = X[:-1].reshape((self.num_states, self.num_res))
         OH = X[-1]
 
-        temp_mat = self.res_rate_ex_per_state * ((self.last_populations[:, :]) * self.init_protein_conc - M)
+        temp_mat = self.res_rate_ex_per_state * (self.last_populations * self.init_protein_conc - M)
         dLij_dt = temp_mat * OH
 
-        dOH_dt = - np.sum(temp_mat) * OH - self.rate_quench * (self.quench_conc - self.OH_conc + OH + np.sum(M))
+        dOH_dt = - np.sum(temp_mat) * OH - self.rate_quench * (self.quench_conc - self.OH_conc + OH + np.sum(M)) * OH
         
         dX[:-1] = dLij_dt.flatten()
         dX[-1] = dOH_dt
@@ -167,6 +167,7 @@ class FPOPExchanger(object):
  
         raise Exception("jacobian is too big... (num_states * num_res + 1)**2")
 
+
     def get_exchange_probs(self):
         """
         compute the probability of exchanging in the next lagtime seconds
@@ -175,19 +176,33 @@ class FPOPExchanger(object):
         if self.t < self.t0:
             return np.zeros((self.num_states, self.num_res))
         
-        X = scipy.integrate.odeint(self._derivX, 
-                np.concatenate((self.last_populations.flatten(), [self.OH_conc])), 
-                50E-9)[-1]  # only care about end result
+        #print self.last_populations.flatten()
+        #X = scipy.integrate.odeint(self._derivX, 
+        #        np.concatenate((self.last_populations.flatten(), [self.OH_conc])), 
+        #        np.linspace(0, self.lagtime, 30)[1:])[-1]  # only care about end result
+    
+        solver = scipy.integrate.ode(self._derivX)
+        solver.set_integrator('vode', method='bdf')
+        solver.set_initial_value(np.concatenate((np.zeros(self.num_states * self.num_res), [self.OH_conc])))
 
-        print X.shape
+        #solver.integrate(solver.t + self.lagtime)
+
+        m = 10
+        for i in range(1, m + 1):
+            solver.integrate(solver.t + self.lagtime / float(m) * i)
+            
+        X = solver.y
         final_OH_conc = X[-1]
+
         total_exchanged = np.reshape(X[:-1], (self.num_states, self.num_res))
-        print total_exchanged
 
         self.quench_conc = self.quench_conc - self.OH_conc + final_OH_conc + np.sum(total_exchanged)
         self.OH_conc = final_OH_conc
     
-        exchange_probs = total_exchanged / (self.last_populations * self.protein_conc)
+        #print self.last_populations.sum(axis=0)
+        #print total_exchanged
+        #print final_OH_conc, self.quench_conc
+        exchange_probs = total_exchanged / (self.last_populations * self.init_protein_conc)
 
         return exchange_probs
 
@@ -198,13 +213,17 @@ class FPOPExchanger(object):
         """
         
         exchange_probs = self.get_exchange_probs()
+        #print exchange_probs
 
         for i in xrange(self.num_res):
-            X = scipy.sparse.eye(self.num_states, self.num_states) * (1 - exchange_probs[:, i])
+            #X = scipy.sparse.eye(self.num_states, self.num_states) * (1 - exchange_probs[:, i])
+            X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
+            self.last_populations[:, i] = X.dot(self.tProb).T.dot(self.last_populations[:, i])
 
-            self.last_populations[:, i] = X.dot(self.tProb.T.dot(self.last_populations[:, i]))
-
+#        print self.last_populations.sum(axis=0)
         self.exchanged_per_res = np.vstack([self.exchanged_per_res, 1 - self.last_populations.sum(axis=0)])
+        #print self.exchanged_per_res[-1]
+        #print self.last_populations
 
         self.t += self.lagtime
 
