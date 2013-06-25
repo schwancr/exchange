@@ -52,7 +52,8 @@ class FPOPExchanger(object):
     """
     
     def __init__(self, tProb, avg_sasas, protein_conc, OH_conc, quench_conc, pdb,
-        timepoints, exchange_prob_f=None, interp_rates=True, init_pops=None, lagtime=1.):
+        timepoints, exchange_prob_f=None, interp_rates=True, init_pops=None, 
+        lagtime=1., force_dense=False):
         """
         initialize the exchanger
 
@@ -84,9 +85,21 @@ class FPOPExchanger(object):
             population in all states
         lagtime : float, optional
             lagtime of the MSM in SECONDS!!!!
+        force_dense : bool, optional
+            force dense arithmetic, which may be faster but could cause memory issues.
+            (default: False)
         """
 
-        self.tProb = tProb
+        self.force_dense = force_dense
+
+        if self.force_dense:
+            if scipy.sparse.issparse(tProb):
+                self.tProb = tProb.toarray()
+            else:
+                self.tProb = np.array(self.tProb)
+        else:
+            self.tProb = tProb
+
         self.num_states = tProb.shape[0]
     
         self.avg_sasas = avg_sasas
@@ -252,9 +265,16 @@ class FPOPExchanger(object):
         
         exchange_probs = self.get_exchange_probs()
 
+        if self.force_dense:
+            get_X = lambda x, i : scipy.sparse.dia_matrix((np.reshape((1 - x[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
+        else:
+            get_X = lambda x, i : np.eye((self.num_states, self.num_states)) * x[:, i]
+
         for i in xrange(self.num_res):
-            X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
-            self.last_populations[:, i] = X.dot(self.tProb).T.dot(self.last_populations[:, i])
+            #X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
+            X = get_X(exchange_probs, i)
+
+            self.last_populations[:, i] = self.tProb.T.dot(X.dot(self.last_populations[:, i]))
 
         self.exchanged_per_res = np.vstack([self.exchanged_per_res, 1 - self.last_populations.sum(axis=0)])
 
