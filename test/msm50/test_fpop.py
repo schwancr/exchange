@@ -10,11 +10,12 @@ pdb = Trajectory.load_from_pdb('proteinG_wt.rename.pdb')
 
 avg_sasas = np.loadtxt('avg_sasas.dat')
 
-exchanger = FPOPExchanger(t, avg_sasas, 100E-6, 1E-3, 20E-3, pdb, lagtime=50E-9)
+timepoints = np.arange(0, 200, 50)[1:]
 
-for i in range(100):
+print timepoints.shape
 
-    print i
-    exchanger.next_step()
+exchanger = FPOPExchanger(t, avg_sasas, 100E-6, 1E-3, 20E-3, pdb, timepoints, lagtime=50E-9, init_pops=np.loadtxt('init48.dat'))
+
+total_products, total_res_pops = exchanger.run(return_res_pops=True, num_labels=10)
 
 IPython.embed()

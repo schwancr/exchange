@@ -52,7 +52,7 @@ class FPOPExchanger(object):
     """
     
     def __init__(self, tProb, avg_sasas, protein_conc, OH_conc, quench_conc, pdb,
-        exchange_prob_f=None, interp_rates=True, init_pops=None, lagtime=1.):
+        timepoints, exchange_prob_f=None, interp_rates=True, init_pops=None, lagtime=1.):
         """
         initialize the exchanger
 
@@ -63,15 +63,17 @@ class FPOPExchanger(object):
         avg_sasas : np.ndarray
             sasas for the sidechains you want to simulate FPOP for. Rows should
             be the states, while columns should correspond to the residues of interest
-        exchange_prob_f : function
-            function that takes a state_var for each state and returns a
-            probability of exchanging in one lagtime
         protein_conc : float
             initial protein concentration in M
         OH_conc : float
             initial OH concentration upon excitation in M
-        residue : str
-            three letter residue name abbreviation (e.g. gly, thr, trp, etc.)
+        pdb : msmbuilder.Trajectory
+            pdb to find the residue names
+        timepoints : np.ndarray or list
+            timepoints to simulate an fpop experiment for. Should be in FRAMES
+        exchange_prob_f : function
+            function that takes a state_var for each state and returns a
+            probability of exchanging in one lagtime
         interp_rates : bool, optional
             the rate constants are unavailable for ILE, PRO, and GLN so
             Christian Schwantes guessed an order of magnitude value for each
@@ -127,7 +129,7 @@ class FPOPExchanger(object):
 
         self.t = 0
     
-        self.t0 = 1E-7
+        self.timepoints = np.unique(timepoints)  # unique checks for repeats and also sorts
 
         self.exchanged_per_res = np.zeros((1, self.num_res))
 
@@ -223,7 +225,7 @@ class FPOPExchanger(object):
 
         #solver.integrate(solver.t + self.lagtime)
 
-        m = 100
+        m = 10
         for i in range(1, m + 1):
             solver.integrate(solver.t + self.lagtime / float(m) * i)
             
@@ -249,18 +251,138 @@ class FPOPExchanger(object):
         """
         
         exchange_probs = self.get_exchange_probs()
-        #print exchange_probs
 
         for i in xrange(self.num_res):
-            #X = scipy.sparse.eye(self.num_states, self.num_states) * (1 - exchange_probs[:, i])
             X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
             self.last_populations[:, i] = X.dot(self.tProb).T.dot(self.last_populations[:, i])
 
-#        print self.last_populations.sum(axis=0)
         self.exchanged_per_res = np.vstack([self.exchanged_per_res, 1 - self.last_populations.sum(axis=0)])
-        #print self.exchanged_per_res[-1]
-        #print self.last_populations
 
         self.t += self.lagtime
 
 
+    def _rewind(self, t, populations):
+        """
+        rewind the simulation to some time t and reset OH and quencher conc
+        
+        Parameters:
+        -----------
+        t : float
+            time to rewind to (in FRAMES)
+        populations : np.ndarray
+            populations corresponding to "last_populations" at time t0
+        """
+
+        if self.last_populations.shape != populations.shape:
+            raise Exception("invalid input for 'populations'")
+
+        num_frames = int(t)
+
+        self.exchanged_per_res = self.exchanged_per_res[:num_frames]
+
+        self.last_populations = populations
+
+        self.t = t * self.lagtime
+
+        self.OH_conc = float(self.init_OH_conc)
+        self.quench_conc = float(self.init_quench_conc)
+
+
+    def _compute_total_products(self, num_labels):
+        """
+        compute the product distribution or peptides with 0, 1, 2, .., N labels
+        
+        Parameters
+        ----------
+        num_labels : int
+            number of labels to compute populations of
+        
+        Returns:
+        --------
+        product_dist : np.ndarray
+
+            product distribution of each multi-labeled product 0 ... N
+        """
+
+        product_dist = np.ones(num_labels + 1) * -1  # add one to include 0-label
+
+        res_probs = self.exchanged_per_res[-1]
+        not_res_probs = 1 - res_probs
+        ratio_probs = res_probs / not_res_probs
+        ratio_probs_sum = ratio_probs.sum()
+
+        product_dist[0] = np.product(not_res_probs)
+
+        for i in xrange(1, num_labels + 1):
+            product_dist[i] = ratio_probs_sum * product_dist[i - 1]
+
+        return product_dist
+
+
+    def run(self, return_res_pops=False, num_labels=5, max_steps=10000, tol=1E-6):
+        """
+        Run the simulation!!
+        This will calculate the total exchanged as a function of the timepoints
+        at which the OH radical was produced.
+        
+        Parameters
+        ----------
+        return_res_pops : bool, optional
+            return both the total products formed as well as the individual
+            populations per residue (default: False)
+        num_labels : int, optional
+            number of products to calculate probabilities for. (default: 5)
+        max_steps : int, optional
+            maximum number of steps to take when trying to compute converged
+            exchange populations (default: 10000)
+        tol : float, optional
+            tolerance to use for saying the exchanged populations have converged
+            (default: 1E-6)
+
+        Returns:
+        --------
+        product_dist : np.ndarray
+            distribution of products, up to N labels
+        exchange_per_res : np.ndarray
+            amount exchanged per residue as a function of time. rows correspond
+            to the timepoints in 'timepoints' and columns are residues
+        """
+
+        temp_populations = None  # hold the populations from the frame right before
+            # exchanging so we can use it in the next time point without redoing
+            # some propagating
+        
+        total_exchanged_per_res = np.ones((self.timepoints.shape[0], self.num_res)) * -1
+        total_product_pops = np.ones((self.timepoints.shape[0], num_labels + 1)) * -1
+
+        buff = 0
+        for i, n0 in enumerate(self.timepoints):
+            
+            if i > 0:
+                print temp_populations
+                self._rewind(self.timepoints[i - 1], temp_populations)
+                buff = self.timepoints[i - 1]
+
+            self.t0 = n0 * self.lagtime
+            print i
+            for frame in xrange(max_steps):
+
+                if (frame + buff) == n0:
+                    print 'here'
+                    temp_populations = self.last_populations  # we will exchange this step
+
+                self.next_step()
+
+                if (len(self.exchanged_per_res) > 1) and ((frame + buff) > n0):
+                    if np.abs(self.exchanged_per_res[-1] - self.exchanged_per_res[-2]).max() < tol:
+                        print "broke"
+                        break
+
+            total_exchanged_per_res[i] = self.exchanged_per_res[-1]
+    
+            total_product_pops[i] = self._compute_total_products(num_labels)
+
+        if return_res_pops:
+            return total_product_pops, total_exchanged_per_res
+
+        return total_product_pops
