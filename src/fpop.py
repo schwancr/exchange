@@ -1,4 +1,3 @@
-from exchanger import BaseExchanger
 import scipy.sparse
 import numpy as np
 from scipy.integrate import ode
@@ -263,4 +262,5 @@ class FPOPExchanger(object):
         #print self.last_populations
 
         self.t += self.lagtime
+
 
