@@ -106,14 +106,14 @@ class FPOPExchanger(object):
             self.rate_dict = RATE_CONSTANTS
             self.rate_quench = 1E8  # guess at the quench rate..
         
-        #self._setup_ODE()
-        
         self.res_rate_ex = []
+        self.res_names = []
         for i in np.unique(pdb['ResidueID']):
             res_name = pdb['ResidueNames'][np.where(pdb['ResidueID'] == i)][0].lower()
             if not res_name in self.rate_dict.keys():
                 raise Exception("unrecognized residue %s" % self.residue)
 
+            self.res_names.append(res_name)
             self.res_rate_ex.append(self.rate_dict[res_name])
 
         self.num_res = len(self.res_rate_ex)
@@ -134,12 +134,49 @@ class FPOPExchanger(object):
 
     def _get_state_rates(self):
 
+        ref_sasa_dict = {
+        'ala' : 0.67,
+        'arg' : 1.96,
+        'asn' : 1.13,
+        'asp' : 1.06,
+        'cys' : 1.04,
+        'gln' : 1.44,
+        'glu' : 1.38,
+        'gly' :   -1,  # label to remove later
+        'his' : 1.51,
+        'ile' : 1.40,
+        'leu' : 1.37,
+        'lys' : 1.67,
+        'met' : 1.60,
+        'phe' : 1.75,
+        'pro' : 1.05,
+        'ser' : 0.80,
+        'thr' : 1.02,
+        'trp' : 2.17,
+        'tyr' : 1.87,
+        'val' : 1.17
+        }
+
+        ref_sasa_per_res = []
+        for name in self.res_names:
+            ref_sasa_per_res.append(ref_sasa_dict[name])
+
+        ref_sasa_per_res = np.array(ref_sasa_per_res)
+
+        perc_sasa = self.avg_sasas / np.reshape(ref_sasa_per_res, (1, -1))
+
+        perc_sasa[:, np.where(ref_sasa_per_res < 0)[0]] = 0
+        # for glycine, need to set to zero
+
+        rate_mat = perc_sasa ** 10 * self.res_rate_ex
+        return rate_mat
+
         # first just do On or Off
-        temp_rate_mat = np.vstack([self.res_rate_ex] * self.num_states)
+        #temp_rate_mat = np.vstack([self.res_rate_ex] * self.num_states)
 
-        temp_rate_mat[np.where(self.avg_sasas < 0.5)] = 0
+        #temp_rate_mat[np.where(self.avg_sasas < 0.5)] = 0
 
-        return temp_rate_mat
+        #return temp_rate_mat
 
     def _derivX(self, t, X):
         # first num_states are the state populations
@@ -187,7 +224,7 @@ class FPOPExchanger(object):
 
         #solver.integrate(solver.t + self.lagtime)
 
-        m = 10
+        m = 100
         for i in range(1, m + 1):
             solver.integrate(solver.t + self.lagtime / float(m) * i)
             
