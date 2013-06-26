@@ -23,21 +23,36 @@ Framework for predicting FPOP experiments from folding simulations and Markov St
 
 To model the FPOP experiment within the MSM framework, we have to model the exchange reaction probabilistically. First, we need to define some things from the MSM framework.
 
-\begin{enumerate}
-\item $T$ : transition probability matrix, $T_{ij}$ is the probability of transferring to state $j$ in time $\tau$ (the lag time) given that the current state is state $i$
-\item $P_{ij}$ : (relative) population of protein that is in state $i$ in the MSM and is currently unlabeled at residue $j$
-\item $M_{ij}$ : total population of protein that is in state $i$ and is labeled at state $j$
-\item $k_{ij}$ : rate constant of reaction with radical hydroxyl. It is both a function of the current state (i.e. its SASA) as well as the residue's identity.
+\begin{itemize}
+\item $T$: transition probability matrix, $T_{ij}$ is the probability of transferring to state $j$ in time $\tau$ (the lag time) given that the current state is state $i$
+\item $P_{ij}$: (relative) population of protein that is in state $i$ in the MSM and is currently unlabeled at residue $j$
+\item $M_{ij}$: total population of protein that is in state $i$ and is labeled at state $j$
+\item $k_{ij}$: rate constant of reaction with radical hydroxyl. It is both a function of the current state (i.e. its SASA) as well as the residue's identity.
+\end{itemize}
 
-
-The reactions that govern the exchange reaction can be modeled with the following ODE's:
+The rates that govern the exchange reaction can be modeled with the following ODE's:
 \begin{equation}
-\frac{d(M_ij)}{dt} = k_{ij} P_{ij} * R_0 OH
+\frac{d(M_{ij})}{dt} = k_{ij} (P_{ij} R_0) OH
 \end{equation}
 
 \begin{equation}
-\frac{d(OH)}{dt} = - \sum_{i, j} k_{ij} P_{ij} * R_0 OH 
+\frac{d(OH)}{dt} = - \sum_{i, j} k_{ij} (P_{ij} R_0) OH - k_Q (Q) (OH)
+\end{equation} where $OH$ is the amount of radical hydroxide, $R_0$ is the initial protein concentration, $k_Q$ is the quenching reaction rate constant, and $Q$ is the quencher concentration.
 
+The rigorous way to model this process would be to add the MSM master equation in the form of a rate matrix. This would govern the transfer of probability between the $P_{ij}$ and the above two equations would govern the exchange reaction. However, we currently lack the ability to reliably compute the correct rate matrix from a given transition probability matrix. Therefore, we are forced to transfer the above framework into the probability framework of the MSM.
+
+The strategy is to integrate the above reactions for a single lagtime. The total labeled then corresponds to the probability of exchanging at that time. We can then use a modified transition matrix to simulate the dynamics of the MSM state propagation coupled with the OH labeling reaction:
+$$\left[
+\begin{array}{cc}
+\sim X(t) T & X(t)T \\
+0 & T 
+\end{array}\right]$$ Where $X(t)$ is a diagonal matrix whose $i^\textnormal{th}$ entry corresponds to the probability of exchanging in one lag time starting at time $t$. The corresponding $~X(t)$ is the diagonal matrix with the probability of {\it not} exchanging within one lag time. The result is a populations vector which is twice as long as the number of states. The first half corresponds to the population that has yet to be exchanged, and the latter half corresponds to the population that has already exchanged.
+
+This modified transition matrix must be computed for each residue at each time step of the simulation. By keeping track of the total that is exchanged or not exchanged at each site, one can compute the probability of exchanging for the entire reaction at each residue.
+
+These probabilities then form the Poisson-Bernoulli distribution, and can be used to calculate the population of protein that exists with $k$ labels.
+
+One problem that we currently face is how to calculate $k_{ij}$. We know from the literature the rate constants for free amino acids, however we do not know how the rate changes when the residue is exposed or protected partially.
 
 \bibliography{bibliography}
 \end{document}
