@@ -1,0 +1,43 @@
+\documentclass[twocolumn,floatfix,nofootinbib,aps]{revtex4-1}
+\usepackage[utf8]{inputenc}
+
+\usepackage{amsmath}    % need for subequations
+\usepackage{amssymb}    % for symbols
+\usepackage{graphicx}   % need for figures
+\usepackage{verbatim}   % useful for program listings
+\usepackage{color}      % use if color is used in text
+\usepackage{subfigure}  % use for side-by-side figures
+%\usepackage{hyperref}   % use for hypertext links, including those to external documents and URLs
+\usepackage[capitalise]{cleveref}   % use for referencing figures/equations
+\begin{document}
+
+\title{Predicting FPOP Experimental Observables within the MSM Framework}
+\author{Christian R. Schwantes}
+\author{Diwakar Shukla}
+\author{Vijay S. Pande}
+
+\begin{abstract}
+Framework for predicting FPOP experiments from folding simulations and Markov State Models.\end{abstract}
+
+\maketitle
+
+To model the FPOP experiment within the MSM framework, we have to model the exchange reaction probabilistically. First, we need to define some things from the MSM framework.
+
+\begin{enumerate}
+\item $T$ : transition probability matrix, $T_{ij}$ is the probability of transferring to state $j$ in time $\tau$ (the lag time) given that the current state is state $i$
+\item $P_{ij}$ : (relative) population of protein that is in state $i$ in the MSM and is currently unlabeled at residue $j$
+\item $M_{ij}$ : total population of protein that is in state $i$ and is labeled at state $j$
+\item $k_{ij}$ : rate constant of reaction with radical hydroxyl. It is both a function of the current state (i.e. its SASA) as well as the residue's identity.
+
+
+The reactions that govern the exchange reaction can be modeled with the following ODE's:
+\begin{equation}
+\frac{d(M_ij)}{dt} = k_{ij} P_{ij} * R_0 OH
+\end{equation}
+
+\begin{equation}
+\frac{d(OH)}{dt} = - \sum_{i, j} k_{ij} P_{ij} * R_0 OH 
+
+
+\bibliography{bibliography}
+\end{document}
