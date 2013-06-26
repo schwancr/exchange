@@ -105,11 +105,12 @@ class FPOPExchanger(object):
         if not num_vecs is None:
             self.num_vecs = num_vecs
         else:
-            self.num_vecs = len(self.tProb)
+            self.num_vecs = self.tProb.shape[0]
 
         # first, perform the eigendecomposition
         if eigsol is None:
             self.evals, self.psi_L = msm_analysis.get_eigenvectors(self.tProb, self.num_vecs)
+            self.num_vecs = len(self.evals)
         else:
             ind = np.argsort(eigsol[0])[::-1][:self.num_vecs]
 
@@ -219,6 +220,7 @@ class FPOPExchanger(object):
         # for glycine, need to set to zero
 
         rate_mat = perc_sasa ** 10 * self.res_rate_ex
+        print rate_mat.var(axis=0)
         return rate_mat
 
         # first just do On or Off
@@ -282,6 +284,7 @@ class FPOPExchanger(object):
         final_OH_conc = X[-1]
 
         total_exchanged = np.reshape(X[:-1], (self.num_states, self.num_res))
+        print total_exchanged
 
         self.quench_conc = self.quench_conc - self.OH_conc + final_OH_conc + np.sum(total_exchanged)
         self.OH_conc = float(final_OH_conc)
@@ -300,9 +303,10 @@ class FPOPExchanger(object):
         """
         
         exchange_probs = self.get_exchange_probs()
+        print exchange_probs.var(0)
 
         if self.force_dense:
-            get_X = lambda x : np.eye((self.num_states, self.num_states)) * x
+            get_X = lambda x : np.eye(self.num_states) * x
         else:
             get_X = lambda x : scipy.sparse.dia_matrix((np.reshape((1 - x), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
 
@@ -387,7 +391,7 @@ class FPOPExchanger(object):
         new_populations = init_populations.dot(self.psi_R).dot(D).dot(self.psi_L.T)
 
         self.last_populations = np.vstack([new_populations] * self.num_res).T
-        print self.last_populations[:,0] - self.pi
+        #print self.last_populations[:,0] - self.pi
 
         self.t += self.lagtime * num_steps
 
