@@ -10,7 +10,7 @@ pdb = Trajectory.load_from_pdb('proteinG_wt.rename.pdb')
 
 avg_sasas = np.loadtxt('avg_sasas.dat')
 
-timepoints = np.arange(0, 50000, 1000)[1:]
+timepoints = np.arange(0, 50000, 5000)[1:]
 
 print timepoints.shape
 

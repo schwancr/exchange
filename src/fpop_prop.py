@@ -2,7 +2,6 @@ import scipy.sparse
 import numpy as np
 from scipy.integrate import ode
 import copy
-from msmbuilder import msm_analysis
 
 RATE_CONSTANTS = {
 'cys' : 3.4E10,
@@ -54,7 +53,7 @@ class FPOPExchanger(object):
     
     def __init__(self, tProb, avg_sasas, protein_conc, OH_conc, quench_conc, pdb,
         timepoints, exchange_prob_f=None, interp_rates=True, init_pops=None, 
-        lagtime=1., force_dense=False, num_vecs=None):
+        lagtime=1., force_dense=False):
         """
         initialize the exchanger
 
@@ -98,35 +97,8 @@ class FPOPExchanger(object):
                 self.tProb = tProb.toarray()
             else:
                 self.tProb = np.array(self.tProb)
-
         else:
             self.tProb = tProb
-
-        if not num_vecs is None:
-            self.num_vecs = num_vecs
-        else:
-            self.num_vecs = len(self.tProb)
-
-        self.evals, self.psi_L = msm_analysis.get_eigenvectors(self.tProb, self.num_vecs)
-            # first, perform the eigendecomposition
-
-        #pos_ind = np.where(lambd > 0)[0]
-        #lambd = lambd[pos_ind]
-        #psi_L = psi_L[:, pos_ind]
-        #n_modes = len(lambd)
-        #logger.info("Found %d non-negative eigenvalues" % n_modes)
-
-        assert self.evals[0] != 1
-
-        # normalize eigenvectors
-        self.pi = self.psi_L[:, 0]
-        self.pi /= self.pi.sum()
-
-        self.psi_R = np.zeros(self.psi_L.shape)
-
-        for i in range(self.num_vecs):
-            self.psi_L[:, i] /= np.sqrt(np.sum(np.square(self.psi_L[:, i]) / self.pi))
-            self.psi_R[:, i] = self.psi_L[:, i] / self.pi
 
         self.num_states = tProb.shape[0]
     
@@ -276,7 +248,7 @@ class FPOPExchanger(object):
         total_exchanged = np.reshape(X[:-1], (self.num_states, self.num_res))
 
         self.quench_conc = self.quench_conc - self.OH_conc + final_OH_conc + np.sum(total_exchanged)
-        self.OH_conc = float(final_OH_conc)
+        self.OH_conc = final_OH_conc
     
         #print self.last_populations.sum(axis=0)
         #print total_exchanged
@@ -294,18 +266,15 @@ class FPOPExchanger(object):
         exchange_probs = self.get_exchange_probs()
 
         if self.force_dense:
-            get_X = lambda x : scipy.sparse.dia_matrix((np.reshape((1 - x), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
+            get_X = lambda x, i : scipy.sparse.dia_matrix((np.reshape((1 - x[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
         else:
-            get_X = lambda x : np.eye((self.num_states, self.num_states)) * x
+            get_X = lambda x, i : np.eye((self.num_states, self.num_states)) * x[:, i]
 
         for i in xrange(self.num_res):
             #X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
-            X = get_X(exchange_probs[:, i])
+            X = get_X(exchange_probs, i)
 
-            #temp = X.dot(self.tProb).T.dot(self.last_populations[:, i])
             self.last_populations[:, i] = self.tProb.T.dot(X.dot(self.last_populations[:, i]))
-
-            #assert np.abs(temp - self.last_populations[:,i]).sum() < 1E-10
 
         self.exchanged_per_res = np.vstack([self.exchanged_per_res, 1 - self.last_populations.sum(axis=0)])
 
@@ -324,14 +293,14 @@ class FPOPExchanger(object):
             populations corresponding to "last_populations" at time t0
         """
 
-        if self.last_populations[:, 0].shape != populations.shape:
+        if self.last_populations.shape != populations.shape:
             raise Exception("invalid input for 'populations'")
 
         num_frames = int(t)
 
         self.exchanged_per_res = self.exchanged_per_res[:num_frames]
 
-        self.last_populations = np.vstack([populations] * self.num_res).T
+        self.last_populations = populations
 
         self.t = t * self.lagtime
 
@@ -351,6 +320,7 @@ class FPOPExchanger(object):
         Returns:
         --------
         product_dist : np.ndarray
+
             product distribution of each multi-labeled product 0 ... N
         """
 
@@ -365,23 +335,12 @@ class FPOPExchanger(object):
         # this is the poisson-bernoulli distribution
         for k in xrange(1, num_labels + 1):
             mini_sum = 0.
-            for i in range(1, k + 1):
+            for i in range(k + 1):
                 mini_sum += (-1) ** (i - 1) * product_dist[k - i] * np.sum(np.power(ratio_probs, i))
             
             product_dist[k] = 1 / float(k) * mini_sum
 
         return product_dist
-
-
-    def _jump(self, num_steps, init_populations):
-
-        D = np.eye(self.num_states) * np.power(self.evals, num_steps)
-        new_populations = init_populations.dot(self.psi_R).dot(D).dot(self.psi_L.T)
-
-        self.last_populations = np.vstack([new_populations] * self.num_res).T
-        print self.last_populations[:,0] - self.pi
-
-        self.t += self.lagtime * num_steps
 
 
     def run(self, return_res_pops=False, num_labels=5, max_steps=10000, tol=1E-6):
@@ -413,8 +372,7 @@ class FPOPExchanger(object):
             to the timepoints in 'timepoints' and columns are residues
         """
 
-        temp_populations = copy.copy(self.last_populations[:, 0])
-            # hold the populations from the frame right before
+        temp_populations = None  # hold the populations from the frame right before
             # exchanging so we can use it in the next time point without redoing
             # some propagating
         
@@ -425,21 +383,21 @@ class FPOPExchanger(object):
         for i, n0 in enumerate(self.timepoints):
             
             if i > 0:
+                print temp_populations
                 self._rewind(self.timepoints[i - 1], temp_populations)
                 buff = self.timepoints[i - 1]
 
             self.t0 = n0 * self.lagtime
             print i
-
-            self._jump(n0 - buff, temp_populations)
-            temp_populations = copy.copy(self.last_populations[:,0])
-            # no exchange yet, so we have the same
-            # population in each column
-
             for frame in xrange(max_steps):
+
+                if (frame + buff) == n0:
+                    print 'here'
+                    temp_populations = self.last_populations  # we will exchange this step
+
                 self.next_step()
 
-                if (self.t > self.t0):
+                if (len(self.exchanged_per_res) > 1) and ((frame + buff) > n0):
                     if np.abs(self.exchanged_per_res[-1] - self.exchanged_per_res[-2]).max() < tol:
                         print "broke after %d steps" % frame
                         break
