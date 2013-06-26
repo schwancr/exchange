@@ -54,7 +54,7 @@ class FPOPExchanger(object):
     
     def __init__(self, tProb, avg_sasas, protein_conc, OH_conc, quench_conc, pdb,
         timepoints, exchange_prob_f=None, interp_rates=True, init_pops=None, 
-        lagtime=1., force_dense=False, num_vecs=None):
+        lagtime=1., force_dense=False, num_vecs=None, eigsol=None):
         """
         initialize the exchanger
 
@@ -107,8 +107,14 @@ class FPOPExchanger(object):
         else:
             self.num_vecs = len(self.tProb)
 
-        self.evals, self.psi_L = msm_analysis.get_eigenvectors(self.tProb, self.num_vecs)
-            # first, perform the eigendecomposition
+        # first, perform the eigendecomposition
+        if eigsol is None:
+            self.evals, self.psi_L = msm_analysis.get_eigenvectors(self.tProb, self.num_vecs)
+        else:
+            ind = np.argsort(eigsol[0])[::-1][:self.num_vecs]
+
+            self.evals = eigsol[0][ind]
+            self.psi_L = eigsol[1][:, ind]
 
         #pos_ind = np.where(lambd > 0)[0]
         #lambd = lambd[pos_ind]
@@ -173,6 +179,8 @@ class FPOPExchanger(object):
         self.timepoints = np.unique(timepoints)  # unique checks for repeats and also sorts
 
         self.exchanged_per_res = np.zeros((1, self.num_res))
+
+        print "set up done."
 
     def _get_state_rates(self):
 
@@ -294,9 +302,9 @@ class FPOPExchanger(object):
         exchange_probs = self.get_exchange_probs()
 
         if self.force_dense:
-            get_X = lambda x : scipy.sparse.dia_matrix((np.reshape((1 - x), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
-        else:
             get_X = lambda x : np.eye((self.num_states, self.num_states)) * x
+        else:
+            get_X = lambda x : scipy.sparse.dia_matrix((np.reshape((1 - x), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
 
         for i in xrange(self.num_res):
             #X = scipy.sparse.dia_matrix((np.reshape((1 - exchange_probs[:, i]), (1, -1)), np.array([0])), shape=(self.num_states, self.num_states))
@@ -375,7 +383,7 @@ class FPOPExchanger(object):
 
     def _jump(self, num_steps, init_populations):
 
-        D = np.eye(self.num_states) * np.power(self.evals, num_steps)
+        D = np.eye(self.num_vecs) * np.power(self.evals, num_steps)
         new_populations = init_populations.dot(self.psi_R).dot(D).dot(self.psi_L.T)
 
         self.last_populations = np.vstack([new_populations] * self.num_res).T
@@ -439,6 +447,7 @@ class FPOPExchanger(object):
             for frame in xrange(max_steps):
                 self.next_step()
 
+                print frame
                 if (self.t > self.t0):
                     if np.abs(self.exchanged_per_res[-1] - self.exchanged_per_res[-2]).max() < tol:
                         print "broke after %d steps" % frame
