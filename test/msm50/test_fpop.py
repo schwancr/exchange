@@ -2,7 +2,7 @@ from fpop import FPOPExchanger
 import numpy as np
 from scipy.io import mmread
 from msmbuilder import Trajectory
-import IPython
+from pylab import *
 
 t = mmread('tProb.mtx')
 
@@ -18,4 +18,8 @@ exchanger = FPOPExchanger(t, avg_sasas, 100E-6, 1E-3, 20E-3, pdb, timepoints, la
 
 total_products, total_res_pops = exchanger.run(return_res_pops=True, num_labels=10)
 
-IPython.embed()
+for i in range(4):
+    plot(timepoints * 50, total_products[:, i])
+
+xlabel('time (ns)')
+show()
