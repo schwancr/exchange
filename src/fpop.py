@@ -27,6 +27,29 @@ RATE_CONSTANTS = {
 'gly' : 1.7E7
 }
 
+RATE_CONSTANTS_EXT = {
+'cys' : 3.4E10,
+'tyr' : 1.3E10,
+'his' : 1.3E10,
+'met' : 0,
+'phe' : 0,
+'arg' : 0, # note this may not be a plus n*16 since it often breaks off the nitrogen group on the end
+'leu' : 0,
+'ile' : 0, # Not available in paper
+'trp' : 0,
+'pro' : 0, # not available in paper
+'val' : 0,
+'thr' : 0,
+'ser' : 0,
+'glu' : 0,
+'gln' : 0, # not available in paper
+'ala' : 0,
+'asp' : 0,
+'asn' : 0,
+'lys' : 0,
+'gly' : 0
+}
+
 # ^^^^ These rate constants are from Xu et al. (2003) Anal. Chem.
 #  (DOI: 10.1021/ac035104h)
 
@@ -219,8 +242,13 @@ class FPOPExchanger(object):
         perc_sasa[:, np.where(ref_sasa_per_res < 0)[0]] = 0
         # for glycine, need to set to zero
 
-        rate_mat = perc_sasa ** 10 * self.res_rate_ex
-        print rate_mat.var(axis=0)
+        #rate_mat = perc_sasa ** 8 * self.res_rate_ex
+        # polynomial?!
+
+        c = 10.
+        r0 = 0.99
+        rate_mat = 0.5 * (c * (perc_sasa - r0) / (np.sqrt(1 + c * c * (perc_sasa - r0) ** 2)) + 1)
+        rate_mat = rate_mat * self.res_rate_ex
         return rate_mat
 
         # first just do On or Off
@@ -284,7 +312,7 @@ class FPOPExchanger(object):
         final_OH_conc = X[-1]
 
         total_exchanged = np.reshape(X[:-1], (self.num_states, self.num_res))
-        print total_exchanged
+        #print total_exchanged
 
         self.quench_conc = self.quench_conc - self.OH_conc + final_OH_conc + np.sum(total_exchanged)
         self.OH_conc = float(final_OH_conc)
@@ -303,7 +331,7 @@ class FPOPExchanger(object):
         """
         
         exchange_probs = self.get_exchange_probs()
-        print exchange_probs.var(0)
+        #print exchange_probs.var(0)
 
         if self.force_dense:
             get_X = lambda x : np.eye(self.num_states) * x
@@ -451,8 +479,8 @@ class FPOPExchanger(object):
             for frame in xrange(max_steps):
                 self.next_step()
 
-                print frame
-                if (self.t > self.t0):
+            #    print frame
+                if (self.t > self.t0) and (len(self.exchanged_per_res) > 1):
                     if np.abs(self.exchanged_per_res[-1] - self.exchanged_per_res[-2]).max() < tol:
                         print "broke after %d steps" % frame
                         break
