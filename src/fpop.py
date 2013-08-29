@@ -306,7 +306,7 @@ class FPOPExchanger(object):
 
         m = 10
         for i in range(1, m + 1):
-            solver.integrate(solver.t + self.lagtime / float(m) * i)
+            solver.integrate(solver.t + self.lagtime / float(m))
             
         X = solver.y
         final_OH_conc = X[-1]
